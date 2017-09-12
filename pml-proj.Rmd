@@ -1,0 +1,125 @@
+---
+title: "Peer-graded Assignment: Prediction Assignment Writeup"
+author: "ndm"
+date: "September 12, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Introduction
+In this project we apply the machine learning techniques, we analyze the personal activity data set as given, and then make prediction.
+
+### Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.  
+
+In this project, we are required to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.  
+
+## preprocessing on the given dataset
+```{r, cache = T}
+#loading libraries
+library(caret)
+library(corrplot)
+library(rpart)
+library(randomForest)
+library(rpart.plot)
+
+```
+### Downloading the Dataset
+```{r, cache = T}
+trainingUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testingUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainingFile <- "./data/pml-training.csv"
+testingFile  <- "./data/pml-testing.csv"
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+if (!file.exists(trainingFile)) {
+  download.file(trainingUrl, destfile=trainingFile, method="curl")
+}
+if (!file.exists(testingFile)) {
+  download.file(testingUrl, destfile=testingFile, method="curl")
+}
+```  
+### Looking into Dataset
+The datasets are available after the above step. Now we look into these two csv files. So we load them into data frames.  
+```{r, cache = T}
+trainingRaw <- read.csv("./data/pml-training.csv")
+testingRaw <- read.csv("./data/pml-testing.csv")
+dim(trainingRaw)
+dim(testingRaw)
+```
+There are 19622 observations with 160 variables in the training dataset, and 20 observations and 160 variables are in testing dataset. The variable named "classe" contained in training dataset is set to be the outcome of prediction. 
+
+### Data Cleansing
+Now we deal with missing values and meaningless variables present in the datasets. For this we do cleansing of data.
+```{r, cache = T}
+sum(complete.cases(trainingRaw))
+```
+In the first step, the coulmns with missing values are stripped of.
+```{r, cache = T}
+trainingRaw <- trainingRaw[, colSums(is.na(trainingRaw)) == 0] 
+testingRaw <- testingRaw[, colSums(is.na(testingRaw)) == 0] 
+```  
+In the second step, we stripp off the unrelated coulmns.
+```{r, cache = T}
+classe <- trainingRaw$classe
+trainingRemove <- grepl("^X|timestamp|window", names(trainingRaw))
+trainingRaw <- trainingRaw[, !trainingRemove]
+trainingCleaned <- trainingRaw[, sapply(trainingRaw, is.numeric)]
+trainingCleaned$classe <- classe
+testingRemove <- grepl("^X|timestamp|window", names(testingRaw))
+testingRaw <- testingRaw[, !testingRemove]
+testingCleaned <- testingRaw[, sapply(testingRaw, is.numeric)]
+```
+Now, there are 19622 observations with 53 variables in the cleaned training dataset, and 20 observations with 53 variables in the cleaned testing dataset. We continue to keep the variable "classe" in the cleaned training dataset.
+
+### Slicing  the data
+In this phase we are to split the cleaned training datset into two parts. First 70% of the data as training dataset, second 30% of training dataset as validation dataset. The later dataset will be used in cross validation.
+```{r, cache = T}
+set.seed(12345) # For reproducibile purpose
+inTraining <- createDataPartition(trainingCleaned$classe, p=0.70, list=F)
+trainingData <- trainingCleaned[inTraining, ]
+testingData <- trainingCleaned[-inTraining, ]
+```
+
+### Modeling the Data
+Our predictive model is based on random forest algorithm with five-fold cross validation. the algorithm has strength against outliers and covariates. 
+```{r, cache = T}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainingData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+Now we appraise the performance of our model on validation dataset.
+```{r, cache = T}
+predictRf <- predict(modelRf, testingData)
+confusionMatrix(testingData$classe, predictRf)
+```
+```{r, cache = T}
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+The model exhibits estimated accuracy of 99.42%  with 0.58% out of sample error.
+
+### Application of Model on Test Dataset
+In this phase we are to apply this model on Test dataset. At first the coulmn named `problem_id` has to be removed.  
+```{r, cache = T}
+results <- predict(modelRf, testingCleaned[, -length(names(testingCleaned))])
+results
+```  
+
+### Figures
+1. The Correlation Matrix exhibition  
+```{r, cache = T}
+crmPlot <- cor(trainingData[, -length(names(trainingData))])
+corrplot(crmPlot, method="color")
+```
+2. The Decision Tree exhibition
+```{r, cache = T}
+treeMod <- rpart(classe ~ ., data=trainingData, method="class")
+prp(treeMod)
+```
